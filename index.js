@@ -10,7 +10,8 @@ const {
   Events,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  InteractionResponseFlags
 } = require('discord.js');
 
 // 🔑 CONFIG
@@ -59,22 +60,26 @@ const questions = [
 client.once('ready', async () => {
   console.log(`Bot online como ${client.user.tag}`);
 
-  const channel = await client.channels.fetch(PANEL_CHANNEL_ID);
+  try {
+    const channel = await client.channels.fetch(PANEL_CHANNEL_ID);
 
-  const embed = new EmbedBuilder()
-    .setTitle('📋 Formulário RP')
-    .setDescription('Clique no botão abaixo para iniciar.')
-    .setImage(BANNER_URL)
-    .setColor('Blue');
+    const embed = new EmbedBuilder()
+      .setTitle('📋 Formulário RP')
+      .setDescription('Clique no botão abaixo para iniciar.')
+      .setImage(BANNER_URL)
+      .setColor('Blue');
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('start_form')
-      .setLabel('Iniciar Formulário')
-      .setStyle(ButtonStyle.Primary)
-  );
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('start_form')
+        .setLabel('Iniciar Formulário')
+        .setStyle(ButtonStyle.Primary)
+    );
 
-  await channel.send({ embeds: [embed], components: [row] });
+    await channel.send({ embeds: [embed], components: [row] });
+  } catch (err) {
+    console.error('Erro ao enviar painel de formulário:', err);
+  }
 });
 
 // 📌 Fazer pergunta com tempo
@@ -103,44 +108,50 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ▶️ iniciar formulário
   if (interaction.isButton() && interaction.customId === 'start_form') {
-
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
 
     const guild = interaction.guild;
-    const user = interaction.user;
+    const member = await guild.members.fetch(interaction.user.id);
 
-    const channel = await guild.channels.create({
-      name: `form-${user.username}`,
-      type: 0,
-      permissionOverwrites: [
-        { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-        { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-        { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
-      ]
-    });
+    try {
+      const channel = await guild.channels.create(`form-${member.user.username}`, {
+        type: 0, // texto
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel] }
+        ],
+        reason: 'Canal de formulário RP'
+      });
 
-    sessions.set(user.id, {
-      step: 0,
-      answers: {},
-      channelId: channel.id,
-      timeout: null
-    });
+      sessions.set(member.id, {
+        step: 0,
+        answers: {},
+        channelId: channel.id,
+        timeout: null
+      });
 
-    await interaction.followUp({
-      content: `📌 ${channel}\n⚠️ Você tem **30 segundos por pergunta**.`,
-      ephemeral: true
-    });
+      await interaction.followUp({
+        content: `📌 ${channel}\n⚠️ Você tem **30 segundos por pergunta**.`,
+        flags: InteractionResponseFlags.Ephemeral
+      });
 
-    await askQuestion(channel, user.id, 0);
+      await askQuestion(channel, member.id, 0);
+
+    } catch (err) {
+      console.error('Erro ao criar canal de formulário:', err);
+      await interaction.followUp({
+        content: '❌ Não foi possível criar o canal de formulário.',
+        flags: InteractionResponseFlags.Ephemeral
+      });
+    }
   }
 
   // ▶️ aprovar
   if (interaction.isButton() && interaction.customId.startsWith('aprovar_')) {
-
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
 
     const userId = interaction.customId.split('_')[1];
-
     const member = await interaction.guild.members.fetch(userId);
     await member.roles.add(PENDING_ROLE_ID);
 
@@ -159,12 +170,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await resultChannel.send({ embeds: [resultEmbed] });
 
-    interaction.editReply('Aprovado!');
+    await interaction.editReply({ content: 'Aprovado!', flags: InteractionResponseFlags.Ephemeral });
   }
 
   // ▶️ abrir modal reprovar
   if (interaction.isButton() && interaction.customId.startsWith('reprovar_')) {
-
     const userId = interaction.customId.split('_')[1];
 
     const modal = new ModalBuilder()
@@ -177,14 +187,12 @@ client.on(Events.InteractionCreate, async interaction => {
       .setStyle(TextInputStyle.Paragraph);
 
     modal.addComponents(new ActionRowBuilder().addComponents(input));
-
     await interaction.showModal(modal);
   }
 
   // ▶️ resposta do modal
   if (interaction.isModalSubmit() && interaction.customId.startsWith('reprovar_')) {
-
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
 
     const userId = interaction.customId.split('_')[1];
     const motivo = interaction.fields.getTextInputValue('motivo');
@@ -204,7 +212,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await resultChannel.send({ embeds: [resultEmbed] });
 
-    interaction.editReply('Reprovado!');
+    await interaction.editReply({ content: 'Reprovado!', flags: InteractionResponseFlags.Ephemeral });
   }
 });
 
@@ -259,4 +267,5 @@ client.on(Events.MessageCreate, async message => {
   }, 5000);
 });
 
+// Logar o bot
 client.login(TOKEN);
